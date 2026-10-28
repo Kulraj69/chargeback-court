@@ -13,7 +13,7 @@ export type Dispute = {
   buyer: string; transactionId?: string; transactionAt?: string;
   messages: TimelineEvent[]; outcome?: string;
   evidence: string[]; tracking?: Tracking; transaction?: Transaction;
-  availableActions?: string[];
+  availableActions?: string[]; assessmentComplete?: boolean;
 };
 export type TraceEntry = {
   id: string; at: string; method: string; path: string; status: number;
@@ -25,9 +25,9 @@ export type ActionInput = EvidenceInput & {
   outcome?: "BUYER_FAVOR" | "SELLER_FAVOR"; attachments?: Attachment[];
 };
 export type Verdict = {
-  score: number; recommendation: "FIGHT" | "OFFER" | "ACCEPT";
+  score: number; recommendation: "FIGHT" | "OFFER" | "ACCEPT" | "REVIEW";
   missing: string[]; present: string[]; offerAmount: number;
-  expectedRecovery: number; refundCost: number; daysLeft: number | null;
+  refundCost: number; daysLeft: number | null;
   urgent: boolean; explanation: string; supportedReason: boolean;
 };
 export type DocketRow = Dispute & { verdict: Verdict };

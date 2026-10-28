@@ -12,7 +12,12 @@ export async function api(request: Request, work: (ctx: ApiContext) => Promise<R
   const session = cookie && /^[a-f0-9-]{36}$/.test(cookie) ? cookie : crypto.randomUUID();
   const ctx: ApiContext = { session, mode: sandboxEnabled() ? "sandbox" : "mock", trace: [] };
   let result: Record<string, unknown>, status = 200; let retryAfter: number | undefined;
-  try { result = await work(ctx); }
+  try {
+    // No merchant authentication exists yet. Fail closed rather than exposing
+    // one configured merchant's records and actions to every visitor.
+    if (ctx.mode === "sandbox") throw new AppError("Connected sandbox access is disabled pending merchant access control. Use a credential-free synthetic instance.", 503);
+    result = await work(ctx);
+  }
   catch (error) {
     status = error instanceof AppError ? error.status : 500;
     retryAfter = error instanceof AppError ? error.retryAfter : undefined;

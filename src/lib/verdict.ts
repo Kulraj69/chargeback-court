@@ -35,7 +35,9 @@ export function checklist(reason: string): EvidenceItem[] {
 }
 export function daysLeft(due?: string, now = Date.now()): number | null {
   if (!due || !Number.isFinite(Date.parse(due))) return null;
-  return Math.ceil((Date.parse(due) - now) / 86_400_000);
+  const remaining = (Date.parse(due) - now) / 86_400_000;
+  // Preserve overdue status even within the first elapsed day (avoid -0).
+  return remaining < 0 ? Math.floor(remaining) : Math.ceil(remaining);
 }
 export function roundMoney(value: number, currency = "USD"): number {
   const digits = new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 2;
@@ -48,18 +50,19 @@ export function scoreCase(dispute: Dispute, input: EvidenceInput, now = Date.now
   const present = items.filter((item) => selected.has(item.id));
   const score = present.reduce((sum, item) => sum + item.weight, 0);
   const lowValue = dispute.amount.currency === "USD" && dispute.amount.value < 15;
-  const recommendation = lowValue || score < 35 ? "ACCEPT" : score >= 65 ? "FIGHT" : "OFFER";
+  const unassessed = dispute.assessmentComplete === false;
+  const recommendation = unassessed || !items.length || dispute.amountAvailable === false ? "REVIEW" : lowValue || score < 35 ? "ACCEPT" : score >= 65 ? "FIGHT" : "OFFER";
   const days = daysLeft(dispute.due, now);
   // A reproducible heuristic, not a calibrated probability or legal assessment.
   const offerAmount = roundMoney(dispute.amount.value * Math.min(.65, Math.max(.25, 1 - score / 100)), dispute.amount.currency);
   return {
     score, recommendation, missing: items.filter((item) => !present.includes(item)).map((item) => item.label),
     present: present.map((item) => item.id), offerAmount,
-    expectedRecovery: roundMoney(dispute.amount.value * score / 100, dispute.amount.currency),
+
     refundCost: dispute.amount.value, daysLeft: days,
     urgent: dispute.status !== "RESOLVED" && days !== null && days <= 3,
     supportedReason: items.length > 0 && dispute.amountAvailable !== false,
-    explanation: dispute.amountAvailable === false ? "PayPal did not provide a valid dispute amount. Refresh the case and review it manually before acting." : !items.length ? "No checklist for this reason. Manual review required before acting." : lowValue ? "Below the USD 15 time-cost threshold; accepting may cost less than preparing a response." : recommendation === "FIGHT" ? "The evidence you confirmed meets the response threshold." : recommendation === "OFFER" ? "The evidence is mixed. Consider a partial refund to resolve the claim." : "The confirmed evidence is limited. Consider accepting the claim.",
+    explanation: dispute.amountAvailable === false ? "PayPal did not provide a valid dispute amount. Refresh the case and review it manually before acting." : !items.length ? "No checklist for this reason. Manual review required before acting." : unassessed ? "Evidence has not been assessed. Review the checklist and record your assessment before using a recommendation." : lowValue ? "Below the USD 15 time-cost threshold; accepting may cost less than preparing a response." : recommendation === "FIGHT" ? "The evidence you confirmed meets the response threshold." : recommendation === "OFFER" ? "The evidence is mixed. Consider a partial refund to resolve the claim." : "The confirmed evidence is limited. Consider accepting the claim.",
   };
 }
 export function money(amount: { value: number; currency: string }): string {

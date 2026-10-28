@@ -8,6 +8,6 @@ export async function POST(request: Request, { params }: RouteParams) {
     const body = await readBody(request); const dispute = await getCase(ctx, (await params).id);
     const input = validateEvidence(body, dispute.reason);
     if (ctx.mode === "mock") mockStore.saveEvidence(ctx.session, dispute.id, input);
-    return { verdict: scoreCase(dispute, input) };
+    return { verdict: scoreCase({ ...dispute, assessmentComplete: true }, input) };
   });
 }

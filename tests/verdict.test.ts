@@ -30,13 +30,17 @@ describe("reason-weighted evidence assessment", () => {
     expect(scoreCase(d, { evidence: ["delivery", "messages"] }).offerAmount).toBe(50);
     expect(scoreCase(d, base).offerAmount).toBe(25);
   });
-  it("computes estimated retention from score", () => expect(scoreCase(base, base).expectedRecovery).toBe(108.8));
+  it("does not convert evidence score to financial expectations", () => expect(scoreCase(base, base)).not.toHaveProperty("expectedRecovery"));
   it("respects zero-decimal currency rounding", () => expect(roundMoney(35.7, "JPY")).toBe(36));
   it("formats monetary values", () => expect(money({ value: 128, currency: "USD" })).toBe("$128.00"));
 });
 describe("deadlines and calendar", () => {
   it.each([["2026-10-27T12:00:00Z", 0], ["2026-10-27T13:00:00Z", 1], ["2026-10-28T13:00:00Z", 2], ["2026-10-26T12:00:00Z", -1]] as const)("computes %s as %s days", (due, days) => expect(daysLeft(due, now)).toBe(days));
   it("handles absent and invalid deadlines", () => { expect(daysLeft(undefined)).toBeNull(); expect(daysLeft("invalid")).toBeNull(); });
+  it.each([1, 60_000, 3_600_000, 86_400_000])("marks a deadline %s ms in the past as overdue", elapsed => {
+    expect(daysLeft(new Date(now - elapsed).toISOString(), now)).toBe(-1);
+  });
+  it("rounds partial overdue days away from zero", () => expect(daysLeft(new Date(now - 86_400_001).toISOString(), now)).toBe(-2));
   it("marks 3 days urgent and 4 days nonurgent", () => { expect(scoreCase({ ...base, due: new Date(now + 3 * 864e5).toISOString() }, base, now).urgent).toBe(true); expect(scoreCase({ ...base, due: new Date(now + 4 * 864e5).toISOString() }, base, now).urgent).toBe(false); });
   it("does not mark resolved cases urgent", () => expect(scoreCase({ ...base, status: "RESOLVED" }, base, now).urgent).toBe(false));
   it("exports a UTC deadline and one-day reminder", () => { const text = deadlineCalendar(base, new Date(now).toISOString()); expect(text).toContain("DTSTART:20261029T120000Z\r\n"); expect(text).toContain("TRIGGER:-P1D"); expect(text.endsWith("END:VCALENDAR\r\n")).toBe(true); expect(text.split("\r\n").every(l => Buffer.byteLength(l) <= 75)).toBe(true); });

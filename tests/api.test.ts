@@ -37,13 +37,42 @@ describe("API route handlers", () => {
   it("exports calendar text with request trace", async () => { const data = await (await calendar(req(), params())).json(); expect(data.calendar).toContain("BEGIN:VCALENDAR"); expect(data.trace).toHaveLength(1); });
   it("rejects cross-origin actions", async () => expect((await action(req("/", { type: "accept", confirm: true, note: "Accept" }, { origin: "https://attacker.invalid" }), params())).status).toBe(403));
   it("uses mock mode when only one credential is set", async () => { vi.stubEnv("PAYPAL_CLIENT_ID", "test"); expect((await (await list(req())).json()).mode).toBe("mock"); });
-  it("uses the real sandbox client when both credentials are set", async () => {
+  it("blocks the connected route until merchant access control exists", async () => {
     vi.stubEnv("PAYPAL_CLIENT_ID", "fake-id"); vi.stubEnv("PAYPAL_CLIENT_SECRET", "fake-secret");
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ access_token: "fake-token", expires_in: 3600 })).mockResolvedValueOnce(Response.json({ items: [] })); vi.stubGlobal("fetch", fetcher);
-    const response = await list(req()); const data = await response.json(); expect(data.mode).toBe("sandbox"); expect(data.trace).toHaveLength(2); expect(fetcher.mock.calls.every(([url]) => String(url).startsWith("https://api-m.sandbox.paypal.com/"))).toBe(true);
+    const response = await list(req()); const data = await response.json(); expect(response.status).toBe(503); expect(data.mode).toBe("sandbox"); expect(data.trace).toHaveLength(0); expect(fetcher).not.toHaveBeenCalled();
   });
 });
+it("blocks every connected route before provider reads or mutations", async () => {
+  vi.stubEnv("PAYPAL_CLIENT_ID", "test-only-id"); vi.stubEnv("PAYPAL_CLIENT_SECRET", "test-only-secret");
+  const fetcher = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetcher);
+  const responses = await Promise.all([
+    list(req()), detail(req(), params()), calendar(req(), params()),
+    verdict(req("/", { evidence: [] }), params()), brief(req("/", { evidence: [] }), params()),
+    action(req("/", { type: "accept", confirm: true, note: "Test" }), params()),
+  ]);
+  expect(responses.map(response => response.status)).toEqual([503, 503, 503, 503, 503, 503]);
+  expect(fetcher).not.toHaveBeenCalled();
+});
 describe("validation and caps", () => {
+  it("accepts same-origin writes when Next reconstructs a localhost URL", async () => {
+    await expect(readBody(req("/", {}, { host: "127.0.0.1:3000", origin: "http://127.0.0.1:3000", "sec-fetch-site": "same-origin" }))).resolves.toEqual({});
+  });
+  it.each<Record<string, string>>([
+    { host: "127.0.0.1:3000", origin: "http://localhost:3000" },
+    { host: "127.0.0.1:3000", origin: "http://127.0.0.1:3001" },
+    { host: "127.0.0.1:3000", origin: "https://127.0.0.1:3000" },
+    { host: "127.0.0.1:3000", origin: "https://attacker.invalid", "x-forwarded-host": "attacker.invalid" },
+    { host: "127.0.0.1:3000", origin: "http://127.0.0.1:3000", "sec-fetch-site": "cross-site" },
+  ])("rejects origin mismatch or cross-site metadata: %j", async headers => {
+    await expect(readBody(req("/", {}, headers))).rejects.toThrow("Cross-site");
+  });
+  it.each(["application/jsonp", "text/plain; application/json"])("rejects misleading JSON type %s", async contentType => {
+    await expect(readBody(req("/", {}, { "content-type": contentType }))).rejects.toThrow("application/json");
+  });
+  it("accepts JSON media types case-insensitively with parameters", async () => {
+    await expect(readBody(req("/", {}, { "content-type": "Application/JSON; charset=utf-8" }))).resolves.toEqual({});
+  });
   it("rejects malformed JSON and content types", async () => { await expect(readBody(new Request(origin, { method: "POST", headers: { "content-type": "application/json" }, body: "{" }))).rejects.toThrow("Invalid JSON"); await expect(readBody(new Request(origin, { method: "POST", body: "{}" }))).rejects.toThrow("application/json"); });
   it("caps declared and streamed body sizes", async () => { await expect(readBody(req("/", {}, { "content-length": "3000001" }))).rejects.toThrow("too large"); await expect(readBody(req("/", { data: "a".repeat(3000001) }))).rejects.toThrow("too large"); });
   it("rejects unknown, cross-reason and incomplete tracking evidence", () => { expect(() => validateEvidence({ evidence: ["invented"] })).toThrow(); expect(() => validateEvidence({ evidence: ["photos"] }, "ITEM_NOT_RECEIVED")).toThrow(); expect(() => validateEvidence({ evidence: ["tracking"] })).toThrow(); });

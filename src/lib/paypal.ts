@@ -33,6 +33,7 @@ export function parseDispute(raw: unknown): Dispute {
     messages: array(d.messages).slice(-100).map(m => { const r = record(m); return { at: date(r.time_posted) ?? "", actor: string(r.posted_by, "PARTY"), text: string(r.content) }; }),
     outcome: string(record(d.dispute_outcome).outcome_code) || undefined,
     evidence: [], // A PayPal document does not prove that the seller has checked our specific checklist.
+    assessmentComplete: false,
     availableActions: array(d.links).map(l => string(record(l).rel)),
   };
 }
